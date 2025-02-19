@@ -1,63 +1,62 @@
 import sys
 from uuid import UUID
-from typing import List, Union, Optional
-
-from bless.backends.winrt.descriptor import BlessGATTDescriptorWinRT
-from bleak.backends.winrt.characteristic import (  # type: ignore
-    BleakGATTCharacteristicWinRT,
+if sys.version_info[:2] < (3, 8):
+    from typing_extensions import Literal
+else:
+    from typing import Literal
+from typing import Union, Optional, List, Dict, cast, TYPE_CHECKING
+from bleak.backends.winrt.descriptor import (  # type: ignore
+    BleakGATTDescriptorWinRT,
 )
 
 if sys.version_info >= (3, 12):
     from winrt.windows.devices.bluetooth.genericattributeprofile import (  # type: ignore # noqa: E501
         GattProtectionLevel,
-        GattLocalCharacteristicParameters,
-        GattLocalCharacteristic,
-        GattLocalCharacteristicResult,
+        GattLocalDescriptorParameters,
+        GattLocalDescriptor,
+        GattLocalDescriptorResult,
     )
 else:
     from bleak_winrt.windows.devices.bluetooth.genericattributeprofile import (  # type: ignore # noqa: E501
         GattProtectionLevel,
-        GattLocalCharacteristicParameters,
-        GattLocalCharacteristic,
-        GattLocalCharacteristicResult,
+        GattLocalDescriptorParameters,
+        GattLocalDescriptor,
+        GattLocalDescriptorResult,
     )
 
-from bless.backends.service import BlessGATTService
-
-from bless.backends.attribute import (
+if TYPE_CHECKING:
+    from bless.backends.winrt.characteristic import BlessGATTCharacteristicWinRT
+    from bless.backends.characteristic import BlessGATTCharacteristic
+from bless.backends.attribute import (  # noqa: E402
     GATTAttributePermissions,
 )
-
-from bless.backends.characteristic import (
-    BlessGATTCharacteristic,
-    GATTCharacteristicProperties,
+from bless.backends.descriptor import (  # noqa: E402
+    BlessGATTDescriptor,
+    GATTDescriptorProperties,
 )
 
-
-class BlessGATTCharacteristicWinRT(
-    BlessGATTCharacteristic, BleakGATTCharacteristicWinRT
+class BlessGATTDescriptorWinRT(
+    BlessGATTDescriptor, BleakGATTDescriptorWinRT
 ):
     """
-    WinRT implementation of the BlessGATTCharacteristic
+    BlueZ implementation of the BlessGATTDescriptor
     """
-
     def __init__(
         self,
         uuid: Union[str, UUID],
-        properties: GATTCharacteristicProperties,
+        properties: GATTDescriptorProperties,
         permissions: GATTAttributePermissions,
         value: Optional[bytearray],
     ):
         """
         Instantiates a new GATT Characteristic but is not yet assigned to any
         service or application
-
         Parameters
         ----------
         uuid : Union[str, UUID]
             The string representation of the universal unique identifier for
             the characteristic or the actual UUID object
-        properties : GATTCharacteristicProperties
+        properties : GATTDescriptorProperties
             The properties that define the characteristics behavior
         permissions : GATTAttributePermissions
             Permissions that define the protection levels of the properties
@@ -66,57 +65,44 @@ class BlessGATTCharacteristicWinRT(
         """
         value = value if value is not None else bytearray(b"")
         super().__init__(uuid, properties, permissions, value)
-        self.__descriptors: List[BlessGATTDescriptorWinRT] = []
         self.value = value
 
-    async def init(self, service: BlessGATTService):
+    async def init(self, characteristic: "BlessGATTCharacteristic"):
         """
-        Initialize the WinRT GattLocalCharacteristic object
-
+        Initialize the BlueZGattDescriptor object
         Parameters
         ----------
-        service : BlessGATTServiceWinRT
-            The service to assign the characteristic to
+        characteristic : BlessGATTCharacteristic
+            The characteristic to assign the descriptor to
         """
-        char_parameters: GattLocalCharacteristicParameters = (
-            GattLocalCharacteristicParameters()
+        desc_params: GattLocalDescriptorParameters = (
+            GattLocalDescriptorParameters()
         )
-        char_parameters.characteristic_properties = self._properties.value
-        char_parameters.read_protection_level = (
-            BlessGATTCharacteristicWinRT.permissions_to_protection_level(
-                self._permissions, True
+        
+        # desc_params.read_protection_level = (
+        #     GattProtectionLevel.PLAIN
+        #     # BlessGATTDescriptorWinRT.permissions_to_protection_level(
+        #     #     self._permissions, True
+        #     # )
+        # )
+        
+        # desc_params.write_protection_level = (
+        #     GattProtectionLevel.PLAIN
+        #     # BlessGATTDescriptorWinRT.permissions_to_protection_level(
+        #     #     self._permissions, False
+        #     # )
+        # )
+        
+        descriptor_result: GattLocalDescriptorResult = (
+            await characteristic.obj.create_descriptor_async(
+                UUID(self._uuid), desc_params
             )
         )
-        char_parameters.write_protection_level = (
-            BlessGATTCharacteristicWinRT.permissions_to_protection_level(
-                self._permissions, False
-            )
+        
+        gatt_desc: GattLocalDescriptor = descriptor_result.descriptor
+        super(BlessGATTDescriptor, self).__init__(
+            obj=gatt_desc, characteristic_uuid=characteristic.uuid, characteristic_handle=characteristic.handle
         )
-
-        characteristic_result: GattLocalCharacteristicResult = (
-            await service.obj.create_characteristic_async(
-                UUID(self._uuid), char_parameters
-            )
-        )
-
-        gatt_char: GattLocalCharacteristic = characteristic_result.characteristic
-        super(BlessGATTCharacteristic, self).__init__(
-            obj=gatt_char, max_write_without_response_size=128
-        )
-
-    @property
-    def descriptors(self) -> List[BlessGATTDescriptorWinRT]:  # type: ignore
-        """List of characteristics for this service"""
-        return self.__descriptors
-    
-    def add_descriptor(  # type: ignore
-        self,
-        descriptor: BlessGATTDescriptorWinRT
-    ):
-        """
-        Should not be used by end user, but rather by `bleak` itself.
-        """
-        self.__descriptors.append(descriptor)
 
     @staticmethod
     def permissions_to_protection_level(
@@ -148,9 +134,14 @@ class BlessGATTCharacteristicWinRT(
     @property
     def value(self) -> bytearray:
         """Get the value of the characteristic"""
-        return self._value
+        return bytearray(self._value)
 
     @value.setter
     def value(self, val: bytearray):
         """Set the value of the characteristic"""
         self._value = val
+    
+    @property
+    def uuid(self) -> str:
+        """The uuid of this characteristic"""
+        return self.obj.get("UUID").value

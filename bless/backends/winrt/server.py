@@ -7,6 +7,7 @@ from threading import Event
 from asyncio.events import AbstractEventLoop
 from typing import Optional, List, Any, cast
 
+from bless.backends.descriptor import GATTDescriptorProperties
 from bless.backends.server import BaseBlessServer  # type: ignore
 from bless.backends.attribute import (  # type: ignore
     GATTAttributePermissions,
@@ -14,13 +15,15 @@ from bless.backends.attribute import (  # type: ignore
 from bless.backends.characteristic import (  # type: ignore
     GATTCharacteristicProperties,
 )
+from bless.backends.winrt.descriptor import BlessGATTDescriptorWinRT
 from bless.backends.winrt.service import BlessGATTServiceWinRT
 from bless.backends.winrt.characteristic import (  # type: ignore
     BlessGATTCharacteristicWinRT,
 )
 
-
 from bless.backends.winrt.ble import BLEAdapter
+
+from bleak.uuids import normalize_uuid_str
 
 # CLR imports
 # Import of Bleak CLR->UWP Bridge.
@@ -259,6 +262,55 @@ class BlessServerWinRT(BaseBlessServer):
         characteristic.obj.add_write_requested(self.write_characteristic)
         characteristic.obj.add_subscribed_clients_changed(self.subscribe_characteristic)
         service.add_characteristic(characteristic)
+
+    async def add_new_descriptor(
+        self,
+        service_uuid: str,
+        char_uuid: str,
+        desc_uuid: str,
+        properties: GATTDescriptorProperties,
+        value: Optional[bytearray],
+        permissions: GATTAttributePermissions,
+    ):
+        """
+        Add a new characteristic to be associated with the server
+
+        Parameters
+        ----------
+        service_uuid : str
+            The string representation of the UUID of the GATT service to which
+            this existing characteristic belongs
+        char_uuid : str
+            The string representation of the UUID of the GATT characteristic
+            to which this new descriptor should belong
+        desc_uuid : str
+            The string representation of the UUID of the descriptor
+        properties : GATTDescriptorProperties
+            GATT Characteristic Flags that define the descriptor
+        value : Optional[bytearray]
+            A byterray representation of the value to be associated with the
+            descriptor. Can be None if the descriptor is writable
+        permissions : GATTAttributePermissions
+            GATT flags that define the permissions for the descriptor
+        """
+        
+        std_service_uuid = normalize_uuid_str(service_uuid)
+        service: BlessGATTServiceWinRT = cast(
+            BlessGATTServiceWinRT, self.services[std_service_uuid]
+        )
+        std_char_uuid = normalize_uuid_str(char_uuid)
+        characteristic: BlessGATTCharacteristicWinRT = cast(
+            BlessGATTServiceWinRT, service.get_characteristic(std_char_uuid)
+        )
+        std_desc_uuid = normalize_uuid_str(desc_uuid)
+        descriptor: BlessGATTDescriptorWinRT = (
+            BlessGATTDescriptorWinRT(std_desc_uuid, properties, permissions, value)
+        )
+
+        await descriptor.init(characteristic)
+
+        # Add it to the characteristic
+        service.get_characteristic(str(UUID(char_uuid))).add_descriptor(descriptor)
 
     def update_value(self, service_uuid: str, char_uuid: str) -> bool:
         """

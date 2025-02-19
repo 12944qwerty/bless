@@ -57,6 +57,11 @@ elif sys.platform == "win32":
         BlessGATTCharacteristicWinRT as BlessGATTCharacteristic,
     )
 
+    # Descriptor Classes
+    from bless.backends.winrt.descriptor import (  # noqa: F401
+        BlessGATTDescriptorWinRT as BlessGATTDescriptor,
+    )
+
 # type: ignore
 from bless.backends.attribute import (  # noqa: E402 F401
     GATTAttributePermissions,
